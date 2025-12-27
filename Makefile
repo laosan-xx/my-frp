@@ -36,12 +36,6 @@ define Package/frp/install
 		$(INSTALL_DIR) $(1)/etc/uci-defaults; \
 		$(INSTALL_DATA) ./files/$(2).uci-defaults $(1)/etc/uci-defaults/$(2); \
 	fi
-
-	# 如果是 frpc，则生成8个随机英文字母并替换 common 配置块中的 user 值
-	if [ "$(2)" = "frpc" ]; then \
-		RANDOM_USER=$$(cat /dev/urandom 2>/dev/null | tr -dc 'a-zA-Z' | head -c 8 2>/dev/null || openssl rand -base64 6 2>/dev/null | tr -dc 'a-zA-Z' | head -c 8 2>/dev/null || echo $$RANDOM | tr -dc 'a-zA-Z' | head -c 8 2>/dev/null || echo "abcdefgh"); \
-		sed -i "/^config conf .*common/,/^config conf/ s/^[[:space:]]*option user[[:space:]].*/	option user $$RANDOM_USER/" $(1)/etc/config/$(2); \
-	fi
 endef
 
 define Package/frp/template

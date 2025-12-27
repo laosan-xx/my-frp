@@ -42,7 +42,29 @@ service_triggers()
 	procd_add_reload_trigger "$NAME"
 }
 
+generate_random_user() {
+	local pkg="frpc"
+	local section="common"
+	local current_val
+	
+	current_val=$(uci -q get ${pkg}.${section}.user)
+
+	if [ "$current_val" = "0000" ] || [ -z "$current_val" ]; then
+		local new_id
+		new_id=$(head -c 64 /dev/urandom | tr -dc 'a-zA-Z' | head -c 8)
+		
+		uci set ${pkg}.${section}.user="$new_id"
+		uci commit ${pkg}
+		# 强制同步文件到磁盘
+		sync
+		logger -t frpc "Config updated to $new_id, syncing to disk..."
+	fi
+}
+
 start_service() {
+	generate_random_user
+	sleep 1 # 给系统一点点时间完成文件 IO
+
 	local init_cfg=" "
 	local conf_file="/var/etc/$NAME.ini"
 
