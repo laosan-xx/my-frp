@@ -1,9 +1,8 @@
-name: Sync main to second branch
+name: Sync frp version and branches
 
 on:
-  push:
-    branches:
-      - main
+  schedule:
+    - cron: '0 6 * * *'
   workflow_dispatch:
 
 permissions:
@@ -19,6 +18,66 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Get latest version from kuoruan/openwrt-frp
+        id: upstream
+        run: |
+          # Get all branches from kuoruan/openwrt-frp
+          BRANCHES=$(curl -sS "https://api.github.com/repos/kuoruan/openwrt-frp/branches?per_page=100" | jq -r '.[].name')
+
+          # Find the latest releases/* branch (sorted by version)
+          LATEST_BRANCH=$(echo "$BRANCHES" | grep '^releases/' | sort -V | tail -1)
+
+          if [ -z "$LATEST_BRANCH" ]; then
+            echo "No releases branch found"
+            exit 1
+          fi
+
+          echo "Latest upstream branch: $LATEST_BRANCH"
+
+          # Fetch the Makefile from that branch
+          MAKEFILE_CONTENT=$(curl -sS "https://raw.githubusercontent.com/kuoruan/openwrt-frp/${LATEST_BRANCH}/Makefile")
+
+          # Extract PKG_VERSION and PKG_HASH
+          PKG_VERSION=$(echo "$MAKEFILE_CONTENT" | grep '^PKG_VERSION:=' | sed 's/PKG_VERSION:=//')
+          PKG_HASH=$(echo "$MAKEFILE_CONTENT" | grep '^PKG_HASH:=' | sed 's/PKG_HASH:=//')
+
+          if [ -z "$PKG_VERSION" ] || [ -z "$PKG_HASH" ]; then
+            echo "Failed to extract PKG_VERSION or PKG_HASH"
+            exit 1
+          fi
+
+          echo "PKG_VERSION=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+          echo "PKG_HASH=$PKG_HASH" >> "$GITHUB_OUTPUT"
+          echo "Latest version: $PKG_VERSION, hash: $PKG_HASH"
+
+      - name: Update Makefile
+        id: update
+        run: |
+          CURRENT_VERSION=$(grep '^PKG_VERSION:=' Makefile | sed 's/PKG_VERSION:=//')
+          CURRENT_HASH=$(grep '^PKG_HASH:=' Makefile | sed 's/PKG_HASH:=//')
+
+          NEW_VERSION="${{ steps.upstream.outputs.PKG_VERSION }}"
+          NEW_HASH="${{ steps.upstream.outputs.PKG_HASH }}"
+
+          if [ "$CURRENT_VERSION" = "$NEW_VERSION" ] && [ "$CURRENT_HASH" = "$NEW_HASH" ]; then
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            echo "Already up to date (v${CURRENT_VERSION})"
+          else
+            sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${NEW_VERSION}/" Makefile
+            sed -i "s/^PKG_HASH:=.*/PKG_HASH:=${NEW_HASH}/" Makefile
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+            echo "Updated: v${CURRENT_VERSION} -> v${NEW_VERSION}"
+          fi
+
+      - name: Commit and push to main
+        if: steps.update.outputs.updated == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Makefile
+          git commit -m "chore: bump to v${{ steps.upstream.outputs.PKG_VERSION }}-1"
+          git push origin main
+
       - name: Sync main to second branch
         run: |
           git config user.name "github-actions[bot]"
@@ -26,3 +85,11 @@ jobs:
           git checkout second
           git merge main --no-edit
           git push origin second
+
+      - name: Sync main to yanglu branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout yanglu
+          git merge main --no-edit
+          git push origin yanglu
