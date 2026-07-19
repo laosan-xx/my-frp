@@ -77,19 +77,3 @@ jobs:
           git add Makefile
           git commit -m "chore: bump to v${{ steps.upstream.outputs.PKG_VERSION }}-1"
           git push origin main
-
-      - name: Sync main to second branch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout second
-          git merge main --no-edit
-          git push origin second
-
-      - name: Sync main to yanglu branch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout yanglu
-          git merge main --no-edit
-          git push origin yanglu

@@ -1,0 +1,50 @@
+name: Cherry-pick main commits to branches
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  cherry-pick:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: [second, yanglu]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+      - name: Cherry-pick new commits to ${{ matrix.branch }}
+        run: |
+          git config --global user.name 'laosan-xx'
+          git config --global user.email 'xxhy1989@gmail.com'
+
+          AFTER="${{ github.event.after }}"
+
+          if [[ "$AFTER" =~ ^0+$ ]]; then
+            echo "⚠️ 无有效的提交，跳过 cherry-pick"
+            exit 0
+          fi
+
+          # 切换到目标分支
+          git checkout "${{ matrix.branch }}"
+          git pull origin "${{ matrix.branch }}"
+
+          # 直接 cherry-pick 当前 push 的提交
+          echo "🍒 Cherry-picking: $(git log --oneline -1 $AFTER)"
+          if ! git cherry-pick "$AFTER"; then
+            echo "❌ Cherry-pick 冲突，中止 ${{ matrix.branch }} 分支的处理"
+            git cherry-pick --abort
+            exit 1
+          fi
+
+          git push origin "${{ matrix.branch }}"
+          echo "✅ ${{ matrix.branch }} 分支 cherry-pick 完成"
