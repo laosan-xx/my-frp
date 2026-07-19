@@ -50,10 +50,20 @@ generate_random_user() {
 	current_val=$(uci -q get ${pkg}.${section}.user)
 
 	if [ "$current_val" = "0000" ] || [ -z "$current_val" ]; then
-		local new_id
+		local new_id new_id_lower
 		new_id=$(head -c 64 /dev/urandom | tr -dc 'a-zA-Z' | head -c 8)
+		# custom_domains 需要全小写
+		new_id_lower=$(echo "$new_id" | tr 'A-Z' 'a-z')
 		
 		uci set ${pkg}.${section}.user="$new_id"
+
+		# 同步修改 web 段 custom_domains 中的 0000（使用小写 ID）
+		local web_domain
+		web_domain=$(uci -q get ${pkg}.web.custom_domains)
+		if [ -n "$web_domain" ]; then
+			uci set ${pkg}.web.custom_domains="$(echo "$web_domain" | sed "s/0000/$new_id_lower/g")"
+		fi
+
 		uci commit ${pkg}
 		# 强制同步文件到磁盘
 		sync
