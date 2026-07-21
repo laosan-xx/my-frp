@@ -11,20 +11,106 @@ _err() {
 	logger -p daemon.err -t "$NAME" "$*"
 }
 
+# Format value for TOML output (quote strings, leave numbers/booleans bare)
+toml_value() {
+	local val="$1"
+	case "$val" in
+		true|false) printf '%s' "$val" ;;
+		*[!0-9-]*) printf '"%s"' "$val" ;;
+		*) printf '%s' "$val" ;;
+	esac
+}
+
+# Map old INI-style keys to new TOML keys for client common section
+map_common_key() {
+	case "$1" in
+		server_addr)        echo "serverAddr" ;;
+		server_port)        echo "serverPort" ;;
+		token)              echo "auth.token" ;;
+		auth_method)        echo "auth.method" ;;
+		user)               echo "user" ;;
+		login_fail_exit)    echo "loginFailExit" ;;
+		protocol)           echo "transport.protocol" ;;
+		wire_protocol)      echo "transport.wireProtocol" ;;
+		tls_enable)         echo "transport.tls.enable" ;;
+		pool_count)         echo "transport.poolCount" ;;
+		tcp_mux)            echo "transport.tcpMux" ;;
+		heartbeat_interval) echo "transport.heartbeatInterval" ;;
+		heartbeat_timeout)  echo "transport.heartbeatTimeout" ;;
+		dial_server_timeout) echo "transport.dialServerTimeout" ;;
+		dial_server_keepalive) echo "transport.dialServerKeepalive" ;;
+		connect_server_local_ip) echo "transport.connectServerLocalIP" ;;
+		proxy_url)          echo "transport.proxyURL" ;;
+		dns_server)         echo "dnsServer" ;;
+		udp_packet_size)    echo "udpPacketSize" ;;
+		*)                  echo "$1" ;;
+	esac
+}
+
+# Map old INI-style keys to new TOML keys for proxy sections
+map_proxy_key() {
+	case "$1" in
+		type)                    echo "type" ;;
+		local_ip)                echo "localIP" ;;
+		local_port)              echo "localPort" ;;
+		remote_port)             echo "remotePort" ;;
+		use_encryption)          echo "transport.useEncryption" ;;
+		use_compression)         echo "transport.useCompression" ;;
+		bandwidth_limit)         echo "transport.bandwidthLimit" ;;
+		bandwidth_limit_mode)    echo "transport.bandwidthLimitMode" ;;
+		custom_domains)          echo "customDomains" ;;
+		subdomain)               echo "subdomain" ;;
+		group)                   echo "loadBalancer.group" ;;
+		group_key)               echo "loadBalancer.groupKey" ;;
+		health_check_type)       echo "healthCheck.type" ;;
+		health_check_timeout)    echo "healthCheck.timeoutSeconds" ;;
+		health_check_max_failed) echo "healthCheck.maxFailed" ;;
+		health_check_interval)   echo "healthCheck.intervalSeconds" ;;
+		secret_key)              echo "secretKey" ;;
+		allow_users)             echo "allowUsers" ;;
+		*)                       echo "$1" ;;
+	esac
+}
+
+# Keys that require TOML array value
+is_array_key() {
+	case "$1" in
+		customDomains|allowUsers) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
 config_cb() {
 	[ $# -eq 0 ] && return
 
 	local type="$1"
 	local name="$2"
 	if [ "$type" = "conf" ]; then
-		echo "[$name]" >> "$conf_file"
-		option_cb() {
-			local option="$1"
-			local value="$2"
-			[ "$option" = "name" ] && \
-			sed -i "s/$CONFIG_SECTION/$value/g" "$conf_file" || \
-			echo "$option = $value" >> "$conf_file";
-		}
+		if [ "$name" = "common" ]; then
+			# Common section: top-level TOML keys
+			option_cb() {
+				local option="$1"
+				local value="$2"
+				local key=$(map_common_key "$option")
+				echo "$key = $(toml_value "$value")" >> "$conf_file"
+			}
+		else
+			# Proxy section: [[proxies]] array of tables
+			echo "" >> "$conf_file"
+			echo "[[proxies]]" >> "$conf_file"
+			echo "name = \"$name\"" >> "$conf_file"
+			option_cb() {
+				local option="$1"
+				local value="$2"
+				[ "$option" = "name" ] && return 0
+				local key=$(map_proxy_key "$option")
+				if is_array_key "$key"; then
+					echo "$key = [\"$value\"]" >> "$conf_file"
+				else
+					echo "$key = $(toml_value "$value")" >> "$conf_file"
+				fi
+			}
+		fi
 		list_cb() {
 			local name="$1"
 			local value="$2"
@@ -76,7 +162,7 @@ start_service() {
 	sleep 1 # 给系统一点点时间完成文件 IO
 
 	local init_cfg=" "
-	local conf_file="/var/etc/$NAME.ini"
+	local conf_file="/var/etc/$NAME.toml"
 
 	> "$conf_file"
 	config_load "$NAME"

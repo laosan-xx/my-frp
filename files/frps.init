@@ -11,17 +11,59 @@ _err() {
 	logger -p daemon.err -t "$NAME" "$*"
 }
 
+# Format value for TOML output (quote strings, leave numbers/booleans bare)
+toml_value() {
+	local val="$1"
+	case "$val" in
+		true|false) printf '%s' "$val" ;;
+		*[!0-9-]*) printf '"%s"' "$val" ;;
+		*) printf '%s' "$val" ;;
+	esac
+}
+
+# Map old INI-style keys to new TOML keys for server
+map_server_key() {
+	case "$1" in
+		bind_port)            echo "bindPort" ;;
+		bind_addr)            echo "bindAddr" ;;
+		kcp_bind_port)        echo "kcpBindPort" ;;
+		quic_bind_port)       echo "quicBindPort" ;;
+		proxy_bind_addr)      echo "proxyBindAddr" ;;
+		vhost_http_port)      echo "vhostHTTPPort" ;;
+		vhost_https_port)     echo "vhostHTTPSPort" ;;
+		vhost_http_timeout)   echo "vhostHTTPTimeout" ;;
+		tcpmux_http_connect_port) echo "tcpmuxHTTPConnectPort" ;;
+		dashboard_addr)       echo "webServer.addr" ;;
+		dashboard_port)       echo "webServer.port" ;;
+		dashboard_user)       echo "webServer.user" ;;
+		dashboard_pwd)        echo "webServer.password" ;;
+		token)                echo "auth.token" ;;
+		auth_method)          echo "auth.method" ;;
+		max_pool_count)       echo "transport.maxPoolCount" ;;
+		tcp_mux)              echo "transport.tcpMux" ;;
+		heartbeat_timeout)    echo "transport.heartbeatTimeout" ;;
+		tls_force)            echo "transport.tls.force" ;;
+		subdomain_host)       echo "subDomainHost" ;;
+		max_ports_per_client) echo "maxPortsPerClient" ;;
+		udp_packet_size)      echo "udpPacketSize" ;;
+		user_conn_timeout)    echo "userConnTimeout" ;;
+		detailed_errors_to_client) echo "detailedErrorsToClient" ;;
+		*)                    echo "$1" ;;
+	esac
+}
+
 config_cb() {
 	[ $# -eq 0 ] && return
 
 	local type="$1"
 	local name="$2"
 	if [ "$type" = "conf" ]; then
-		echo "[$name]" >> "$conf_file"
+		# Server config: all options are top-level TOML keys
 		option_cb() {
 			local option="$1"
 			local value="$2"
-			echo "$option = $value" >> "$conf_file"
+			local key=$(map_server_key "$option")
+			echo "$key = $(toml_value "$value")" >> "$conf_file"
 		}
 		list_cb() {
 			local name="$1"
@@ -42,7 +84,7 @@ service_triggers()
 
 start_service() {
 	local init_cfg=" "
-	local conf_file="/var/etc/$NAME.ini"
+	local conf_file="/var/etc/$NAME.toml"
 
 	> "$conf_file"
 	config_load "$NAME"
