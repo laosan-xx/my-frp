@@ -18,37 +18,33 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get latest version from kuoruan/openwrt-frp
+      - name: Get latest release tag from laosan-xx/frp
         id: upstream
         run: |
-          # Get all branches from kuoruan/openwrt-frp
-          BRANCHES=$(curl -sS "https://api.github.com/repos/kuoruan/openwrt-frp/branches?per_page=100" | jq -r '.[].name')
+          TAG=$(curl -sS "https://api.github.com/repos/laosan-xx/frp/releases/latest" | jq -r '.tag_name')
 
-          # Find the latest releases/* branch (sorted by version)
-          LATEST_BRANCH=$(echo "$BRANCHES" | grep '^releases/' | sort -V | tail -1)
-
-          if [ -z "$LATEST_BRANCH" ]; then
-            echo "No releases branch found"
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "Failed to get upstream release tag"
             exit 1
           fi
 
-          echo "Latest upstream branch: $LATEST_BRANCH"
-
-          # Fetch the Makefile from that branch
-          MAKEFILE_CONTENT=$(curl -sS "https://raw.githubusercontent.com/kuoruan/openwrt-frp/${LATEST_BRANCH}/Makefile")
-
-          # Extract PKG_VERSION and PKG_HASH
-          PKG_VERSION=$(echo "$MAKEFILE_CONTENT" | grep '^PKG_VERSION:=' | sed 's/PKG_VERSION:=//')
-          PKG_HASH=$(echo "$MAKEFILE_CONTENT" | grep '^PKG_HASH:=' | sed 's/PKG_HASH:=//')
-
-          if [ -z "$PKG_VERSION" ] || [ -z "$PKG_HASH" ]; then
-            echo "Failed to extract PKG_VERSION or PKG_HASH"
-            exit 1
-          fi
+          # Strip leading 'v' to get plain version (e.g. 0.70.8)
+          PKG_VERSION="${TAG#v}"
+          echo "Upstream tag: $TAG -> PKG_VERSION=$PKG_VERSION"
 
           echo "PKG_VERSION=$PKG_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Compute PKG_HASH from upstream tarball
+        id: hash
+        run: |
+          PKG_VERSION="${{ steps.upstream.outputs.PKG_VERSION }}"
+          TARBALL_URL="https://codeload.github.com/laosan-xx/frp/tar.gz/v${PKG_VERSION}"
+          echo "Downloading: $TARBALL_URL"
+          curl -fsSL "$TARBALL_URL" -o frp.tar.gz
+          PKG_HASH=$(sha256sum frp.tar.gz | awk '{print $1}')
+          rm -f frp.tar.gz
           echo "PKG_HASH=$PKG_HASH" >> "$GITHUB_OUTPUT"
-          echo "Latest version: $PKG_VERSION, hash: $PKG_HASH"
+          echo "Computed hash: $PKG_HASH"
 
       - name: Update Makefile
         id: update
@@ -57,7 +53,7 @@ jobs:
           CURRENT_HASH=$(grep '^PKG_HASH:=' Makefile | sed 's/PKG_HASH:=//')
 
           NEW_VERSION="${{ steps.upstream.outputs.PKG_VERSION }}"
-          NEW_HASH="${{ steps.upstream.outputs.PKG_HASH }}"
+          NEW_HASH="${{ steps.hash.outputs.PKG_HASH }}"
 
           if [ "$CURRENT_VERSION" = "$NEW_VERSION" ] && [ "$CURRENT_HASH" = "$NEW_HASH" ]; then
             echo "updated=false" >> "$GITHUB_OUTPUT"

@@ -1,12 +1,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=frp
-PKG_VERSION:=0.70.1
+PKG_VERSION:=0.70.2
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
-PKG_SOURCE_URL:=https://codeload.github.com/fatedier/frp/tar.gz/v${PKG_VERSION}?
-PKG_HASH:=67246606f504cb15df72193f1a83911259e92b6a87838cff8850031efd406dc8
+PKG_SOURCE_URL:=https://codeload.github.com/laosan-xx/frp/tar.gz/v${PKG_VERSION}?
+PKG_HASH:=4e09811f0b2463c9484a8c5f42df76c86a5cfe742b995cf64703d79b2e22ec16
 
 PKG_MAINTAINER:=
 PKG_LICENSE:=Apache-2.0
@@ -16,8 +16,8 @@ PKG_BUILD_DEPENDS:=golang/host
 PKG_BUILD_PARALLEL:=1
 PKG_BUILD_FLAGS:=no-mips16
 
-GO_PKG:=github.com/fatedier/frp
-GO_PKG_BUILD_PKG:=github.com/fatedier/frp/cmd/...
+GO_PKG:=github.com/laosan-xx/frp
+GO_PKG_BUILD_PKG:=github.com/laosan-xx/frp/cmd/...
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -53,7 +53,7 @@ define Package/frp/template
     CATEGORY:=Network
     SUBMENU:=Web Servers/Proxies
     TITLE:=$(1) - fast reverse proxy $(2)
-    URL:=https://github.com/fatedier/frp
+    URL:=https://github.com/laosan-xx/frp
     DEPENDS:=$(GO_ARCH_DEPENDS)
   endef
 
