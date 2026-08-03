@@ -6,6 +6,11 @@
 #   ./sync-frp.sh              # 自动取上游最新 release 并对比/更新 Makefile
 #   ./sync-frp.sh v0.70.8      # 指定某个 release tag 进行同步
 #
+# 同步策略: 对比上游最新版本号与最新 PKG_HASH，二者任一不一致则同步上游
+#   - 版本号不同  -> 更新 PKG_VERSION 与 PKG_HASH
+#   - 版本号相同但 HASH 不同 -> 仅更新 PKG_HASH (上游同一版本重新打包)
+#   - 版本号与 HASH 均相同 -> 无需更新
+#
 # 依赖: bash / curl / sha256sum (Git for Windows 自带, 无需 jq)
 # 注意: 未认证调用 GitHub API 有速率限制(约 60 次/小时)
 #
@@ -41,13 +46,10 @@ if [ ! -f "$MAKEFILE" ]; then
 fi
 CURRENT_VERSION=$(grep '^PKG_VERSION:=' "$MAKEFILE" | sed 's/PKG_VERSION:=//')
 echo "==> 本地当前 PKG_VERSION: ${CURRENT_VERSION}"
+CURRENT_HASH=$(grep '^PKG_HASH:=' "$MAKEFILE" | sed 's/PKG_HASH:=//')
+echo "==> 本地当前 PKG_HASH: ${CURRENT_HASH}"
 
-if [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
-  echo "==> 已是最新版本，无需更新。"
-  exit 0
-fi
-
-# 3. 计算新版本的 PKG_HASH
+# 3. 计算上游最新版本的 PKG_HASH
 # 源 tarball 地址与 Makefile 中 PKG_SOURCE_URL 一致
 TARBALL_URL="https://codeload.github.com/${UPSTREAM_REPO}/tar.gz/v${NEW_VERSION}"
 echo "==> 下载并计算 sha256: ${TARBALL_URL}"
@@ -56,12 +58,25 @@ trap 'rm -f "$TMP_TAR"' EXIT
 
 curl -fsSL "$TARBALL_URL" -o "$TMP_TAR"
 NEW_HASH=$(sha256sum "$TMP_TAR" | awk '{print $1}')
-echo "==> 新 PKG_HASH: ${NEW_HASH}"
+echo "==> 上游最新 PKG_HASH: ${NEW_HASH}"
 
-# 4. 更新 Makefile
-echo "==> 更新 ${MAKEFILE}: ${CURRENT_VERSION} -> ${NEW_VERSION}"
-sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${NEW_VERSION}/" "$MAKEFILE"
-sed -i "s/^PKG_HASH:=.*/PKG_HASH:=${NEW_HASH}/" "$MAKEFILE"
+# 4. 对比版本与 HASH，决定是否需要同步
+# 4.1 版本不一致：更新版本 + HASH
+if [ "$CURRENT_VERSION" != "$NEW_VERSION" ]; then
+  echo "==> 版本不一致，更新 ${MAKEFILE}: ${CURRENT_VERSION} -> ${NEW_VERSION}"
+  sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${NEW_VERSION}/" "$MAKEFILE"
+  sed -i "s/^PKG_HASH:=.*/PKG_HASH:=${NEW_HASH}/" "$MAKEFILE"
+  echo "==> 最新 PKG_HASH: ${NEW_HASH}"
+# 4.2 版本一致但 HASH 不一致：仅更新 HASH（上游同一版本重新打包）
+elif [ "$CURRENT_HASH" != "$NEW_HASH" ]; then
+  echo "==> 版本一致，但 PKG_HASH 不一致，同步上游最新 HASH: ${CURRENT_HASH} -> ${NEW_HASH}"
+  sed -i "s/^PKG_HASH:=.*/PKG_HASH:=${NEW_HASH}/" "$MAKEFILE"
+  echo "==> 最新 PKG_HASH: ${NEW_HASH}"
+else
+  echo "==> 版本与 PKG_HASH 均与上游一致，无需更新。"
+  echo "==> 最新 PKG_HASH: ${NEW_HASH}"
+  exit 0
+fi
 
 echo "==> 完成。请检查 git diff 后决定是否提交。"
 git --no-pager diff -- "$MAKEFILE" || true
