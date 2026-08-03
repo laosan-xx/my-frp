@@ -67,9 +67,18 @@ jobs:
 
       - name: Commit and push to main
         if: steps.update.outputs.updated == 'true'
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Makefile
           git commit -m "chore: bump to v${{ steps.upstream.outputs.PKG_VERSION }}-1"
           git push origin main
+          # 记下刚提交的 SHA，供后续 cherry-pick 使用
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cherry-pick update to other branches
+        if: steps.update.outputs.updated == 'true'
+        uses: ./.github/workflows/cherry-pick-to-branches.yml
+        with:
+          commit_sha: ${{ steps.commit.outputs.sha }}

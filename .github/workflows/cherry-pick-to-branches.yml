@@ -1,18 +1,24 @@
 name: Cherry-pick main commits to branches
 
 on:
+  # 允许被 sync-from-upstream.yml 在「确有更新」时直接调用
+  workflow_call:
+    inputs:
+      commit_sha:
+        description: "要 cherry-pick 到其它分支的 commit SHA（来自 main）"
+        required: true
+        type: string
+  # 保留手动/直接 push 触发作为兜底
   push:
     branches:
       - main
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   cherry-pick:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:
@@ -22,25 +28,43 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
-      - name: Cherry-pick new commits to ${{ matrix.branch }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve commit to cherry-pick
+        id: target
+        run: |
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            SHA="${{ inputs.commit_sha }}"
+          else
+            # 直接 push 触发时，使用本次 push 的 HEAD
+            SHA="${{ github.event.after }}"
+          fi
+
+          if [[ "$SHA" =~ ^0+$ ]] || [ -z "$SHA" ]; then
+            echo "⚠️ 无有效的提交，跳过 cherry-pick"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "TARGET_SHA=$SHA" >> "$GITHUB_OUTPUT"
+          echo "🎯 目标 commit: $SHA"
+
+      - name: Cherry-pick to ${{ matrix.branch }}
+        if: steps.target.outputs.skip != 'true'
         run: |
           git config --global user.name 'laosan-xx'
           git config --global user.email 'xxhy1989@gmail.com'
 
-          AFTER="${{ github.event.after }}"
-
-          if [[ "$AFTER" =~ ^0+$ ]]; then
-            echo "⚠️ 无有效的提交，跳过 cherry-pick"
-            exit 0
-          fi
+          SHA="${{ steps.target.outputs.TARGET_SHA }}"
 
           # 切换到目标分支
           git checkout "${{ matrix.branch }}"
           git pull origin "${{ matrix.branch }}"
 
-          # 直接 cherry-pick 当前 push 的提交
-          echo "🍒 Cherry-picking: $(git log --oneline -1 $AFTER)"
-          if ! git cherry-pick "$AFTER"; then
+          # 直接 cherry-pick 目标提交
+          echo "🍒 Cherry-picking: $(git log --oneline -1 $SHA)"
+          if ! git cherry-pick "$SHA"; then
             echo "❌ Cherry-pick 冲突，中止 ${{ matrix.branch }} 分支的处理"
             git cherry-pick --abort
             exit 1
