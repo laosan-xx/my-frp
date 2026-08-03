@@ -1,12 +1,12 @@
-name: Cherry-pick main commits to branches
+name: Sync main Makefile to branches
 
 on:
   # 允许被 sync-from-upstream.yml 在「确有更新」时直接调用
   workflow_call:
     inputs:
       commit_sha:
-        description: "要 cherry-pick 到其它分支的 commit SHA（来自 main）"
-        required: true
+        description: "main 上触发同步的 commit SHA（仅用于日志/追踪）"
+        required: false
         type: string
   # 保留手动/直接 push 触发作为兜底
   push:
@@ -17,7 +17,7 @@ permissions:
   contents: write
 
 jobs:
-  cherry-pick:
+  sync:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -27,48 +27,33 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ matrix.branch }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve commit to cherry-pick
-        id: target
-        run: |
-          if [ -n "${{ inputs.commit_sha }}" ]; then
-            SHA="${{ inputs.commit_sha }}"
-          else
-            # 直接 push 触发时，使用本次 push 的 HEAD
-            SHA="${{ github.event.after }}"
-          fi
-
-          if [[ "$SHA" =~ ^0+$ ]] || [ -z "$SHA" ]; then
-            echo "⚠️ 无有效的提交，跳过 cherry-pick"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "skip=false" >> "$GITHUB_OUTPUT"
-          echo "TARGET_SHA=$SHA" >> "$GITHUB_OUTPUT"
-          echo "🎯 目标 commit: $SHA"
-
-      - name: Cherry-pick to ${{ matrix.branch }}
-        if: steps.target.outputs.skip != 'true'
+      - name: Sync Makefile from main to ${{ matrix.branch }}
+        env:
+          TARGET: ${{ matrix.branch }}
         run: |
           git config --global user.name 'laosan-xx'
           git config --global user.email 'xxhy1989@gmail.com'
 
-          SHA="${{ steps.target.outputs.TARGET_SHA }}"
+          # 直接采用 main 上的 Makefile，避免依赖 cherry-pick 的祖先链
+          git fetch origin main
+          git checkout origin/main -- Makefile
 
-          # 切换到目标分支
-          git checkout "${{ matrix.branch }}"
-          git pull origin "${{ matrix.branch }}"
+          # 确保文件以换行结尾，保持各分支一致
+          [ -z "$(tail -c1 Makefile)" ] || echo >> Makefile
 
-          # 直接 cherry-pick 目标提交
-          echo "🍒 Cherry-picking: $(git log --oneline -1 $SHA)"
-          if ! git cherry-pick "$SHA"; then
-            echo "❌ Cherry-pick 冲突，中止 ${{ matrix.branch }} 分支的处理"
-            git cherry-pick --abort
-            exit 1
+          if git diff --quiet --cached Makefile && git diff --quiet Makefile; then
+            echo "ℹ️ ${{ matrix.branch }} 的 Makefile 已与 main 一致，无需提交"
+            exit 0
           fi
 
-          git push origin "${{ matrix.branch }}"
-          echo "✅ ${{ matrix.branch }} 分支 cherry-pick 完成"
+          git add Makefile
+          MSG="chore: sync Makefile from main"
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            MSG="$MSG (main@${{ inputs.commit_sha }})"
+          fi
+          git commit -m "$MSG"
+          git push origin "$TARGET"
+          echo "✅ ${{ matrix.branch }} 已同步 main 的 Makefile"
