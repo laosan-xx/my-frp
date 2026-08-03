@@ -64,6 +64,9 @@ jobs:
           else
             sed -i "s/^PKG_VERSION:=.*/PKG_VERSION:=${NEW_VERSION}/" Makefile
             sed -i "s/^PKG_HASH:=.*/PKG_HASH:=${NEW_HASH}/" Makefile
+            # 确保文件以换行结尾，避免引入「末尾换行」这种隐藏改动，
+            # 否则 cherry-pick 到其它分支时会因上下文不匹配而冲突
+            [ -z "$(tail -c1 Makefile)" ] || echo >> Makefile
             echo "updated=true" >> "$GITHUB_OUTPUT"
             echo "Updated: v${CURRENT_VERSION} -> v${NEW_VERSION}"
           fi
