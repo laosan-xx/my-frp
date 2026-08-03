@@ -6,7 +6,7 @@ PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/laosan-xx/frp/tar.gz/v${PKG_VERSION}?
-PKG_HASH:=bfa23b4b0e61ead12ed0aadf400a4b6b395ddd5700ab6cbe3d682768e5b61052
+PKG_HASH:=450bd60bf004b49a407cd4c1e3eae6de93c93c3e8633454c9ff1fc8d29b894f0
 
 PKG_MAINTAINER:=
 PKG_LICENSE:=Apache-2.0
