@@ -11,6 +11,9 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    outputs:
+      updated: ${{ steps.update.outputs.updated }}
+      commit_sha: ${{ steps.commit.outputs.sha }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -77,8 +80,9 @@ jobs:
           # 记下刚提交的 SHA，供后续 cherry-pick 使用
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Cherry-pick update to other branches
-        if: steps.update.outputs.updated == 'true'
-        uses: ./.github/workflows/cherry-pick-to-branches.yml
-        with:
-          commit_sha: ${{ steps.commit.outputs.sha }}
+  cherry-pick:
+    needs: sync
+    if: needs.sync.outputs.updated == 'true'
+    uses: laosan-xx/my-frp/.github/workflows/cherry-pick-to-branches.yml@main
+    with:
+      commit_sha: ${{ needs.sync.outputs.commit_sha }}
