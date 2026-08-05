@@ -1,12 +1,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=frp
-PKG_VERSION:=0.70.12
+PKG_VERSION:=0.70.13
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/laosan-xx/frp/tar.gz/v${PKG_VERSION}?
-PKG_HASH:=bce2edf02ee6466b4bdd9d150e1e943baaefd542ced32cae83cdcd7789987bca
+PKG_HASH:=e9c6721d47f207c26cfa371394a0084d0fba9a3920c134f19223e3a1c3bf69e4
 
 PKG_MAINTAINER:=
 PKG_LICENSE:=Apache-2.0
