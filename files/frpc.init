@@ -145,11 +145,11 @@ generate_random_user() {
 		uci set ${pkg}.${section}.user="$new_id"
 		uci set ${pkg}.${section}.client_id="$new_id"
 
-		# 同步修改 web 段 custom_domains 中的 0000（使用小写 ID）
+		# 同步修改 WEB 段 custom_domains 中的 0000（使用小写 ID）
 		local web_domain
-		web_domain=$(uci -q get ${pkg}.web.custom_domains)
+		web_domain=$(uci -q get ${pkg}.WEB.custom_domains)
 		if [ -n "$web_domain" ]; then
-			uci set ${pkg}.web.custom_domains="$(echo "$web_domain" | sed "s/0000/$new_id_lower/g")"
+			uci set ${pkg}.WEB.custom_domains="$(echo "$web_domain" | sed "s/0000/$new_id_lower/g")"
 		fi
 
 		uci commit ${pkg}
