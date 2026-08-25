@@ -2,7 +2,7 @@ name: Sync frp version and branches
 
 on:
   schedule:
-    - cron: '0 6 * * *'
+    - cron: '0 6,14 * * *'
   workflow_dispatch:
 
 permissions:
@@ -82,10 +82,4 @@ jobs:
           git push origin main
           # 记下刚提交的 SHA，供后续 cherry-pick 使用
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-  cherry-pick:
-    needs: sync
-    if: needs.sync.outputs.updated == 'true'
-    uses: laosan-xx/my-frp/.github/workflows/cherry-pick-to-branches.yml@main
-    with:
-      commit_sha: ${{ needs.sync.outputs.commit_sha }}
+          
