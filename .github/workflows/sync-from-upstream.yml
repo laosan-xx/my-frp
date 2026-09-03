@@ -11,6 +11,9 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
+    env:
+      # laosan-xx/frp 已私有：所有访问该仓库的步骤都需要带读取权限的 PAT
+      FRP_PAT: ${{ secrets.FRP_PAT }}
     outputs:
       updated: ${{ steps.update.outputs.updated }}
       commit_sha: ${{ steps.commit.outputs.sha }}
@@ -24,7 +27,17 @@ jobs:
       - name: Get latest release tag from laosan-xx/frp
         id: upstream
         run: |
-          TAG=$(curl -sS "https://api.github.com/repos/laosan-xx/frp/releases/latest" | jq -r '.tag_name')
+          # laosan-xx/frp 已设为私有仓库：匿名 API 会 404，必须用 FRP_PAT 鉴权
+          if [ -z "$FRP_PAT" ]; then
+            echo "ERROR: FRP_PAT is empty, cannot read private repo laosan-xx/frp!"
+            echo "请在仓库 Settings → Secrets and variables → Actions 中添加 FRP_PAT（需有 laosan-xx/frp 读取权限）"
+            exit 1
+          fi
+
+          TAG=$(curl -fsSL \
+            -H "Authorization: Bearer $FRP_PAT" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/laosan-xx/frp/releases/latest" | jq -r '.tag_name')
 
           if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
             echo "Failed to get upstream release tag"
@@ -41,9 +54,32 @@ jobs:
         id: hash
         run: |
           PKG_VERSION="${{ steps.upstream.outputs.PKG_VERSION }}"
-          TARBALL_URL="https://codeload.github.com/laosan-xx/frp/tar.gz/v${PKG_VERSION}"
-          echo "Downloading: $TARBALL_URL"
-          curl -fsSL "$TARBALL_URL" -o frp.tar.gz
+          DOWNLOAD_OK=0
+
+          # 方式一：codeload 直连（x-access-token 基础认证），与 Makefile PKG_SOURCE_URL 同源
+          echo "Downloading: https://codeload.github.com/laosan-xx/frp/tar.gz/v${PKG_VERSION}"
+          curl -fsSL --connect-timeout 20 --retry 5 \
+            -u "x-access-token:$FRP_PAT" \
+            "https://codeload.github.com/laosan-xx/frp/tar.gz/v${PKG_VERSION}" \
+            -o frp.tar.gz && DOWNLOAD_OK=1
+
+          # 方式二：GitHub API tarball（Bearer 认证）——仅当方式一失败时回退
+          # 注意：API 生成的 tarball 与 codeload 的不是同一份字节，哈希以实际下载为准
+          if [ "$DOWNLOAD_OK" -ne 1 ]; then
+            echo "codeload failed, falling back to GitHub API tarball ..."
+            curl -fsSL --connect-timeout 20 --retry 5 \
+              -H "Authorization: Bearer $FRP_PAT" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/laosan-xx/frp/tarball/v${PKG_VERSION}" \
+              -o frp.tar.gz && DOWNLOAD_OK=1
+          fi
+
+          if [ "$DOWNLOAD_OK" -ne 1 ] || [ ! -s frp.tar.gz ]; then
+            rm -f frp.tar.gz
+            echo "ERROR: failed to download laosan-xx/frp v${PKG_VERSION}, please check FRP_PAT permission!"
+            exit 1
+          fi
+
           PKG_HASH=$(sha256sum frp.tar.gz | awk '{print $1}')
           rm -f frp.tar.gz
           echo "PKG_HASH=$PKG_HASH" >> "$GITHUB_OUTPUT"

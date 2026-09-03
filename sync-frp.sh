@@ -11,12 +11,20 @@
 #   - 版本号相同但 HASH 不同 -> 仅更新 PKG_HASH (上游同一版本重新打包)
 #   - 版本号与 HASH 均相同 -> 无需更新
 #
+# 私有仓库访问:
+#   laosan-xx/frp 已设为私有仓库，匿名访问 codeload / API 会 404。
+#   需要提供有该仓库读取权限的 GitHub PAT，通过环境变量传入：
+#     export FRP_PAT='github_pat_xxx'
+#   脚本会优先 codeload 直连(x-access-token)，失败回退 GitHub API tarball(Bearer)。
+#   未设置 FRP_PAT 时按公开仓库处理(上游恢复公开 / 换用其它上游时可用)。
+#   也可用 UPSTREAM_REPO 环境变量覆盖上游仓库，便于测试。
+#
 # 依赖: bash / curl / sha256sum (Git for Windows 自带, 无需 jq)
 # 注意: 未认证调用 GitHub API 有速率限制(约 60 次/小时)
 #
 set -euo pipefail
 
-UPSTREAM_REPO="laosan-xx/frp"
+UPSTREAM_REPO="${UPSTREAM_REPO:-laosan-xx/frp}"
 MAKEFILE="Makefile"
 
 # 1. 确定目标 release tag
@@ -25,7 +33,14 @@ if [ $# -ge 1 ]; then
 else
   echo "==> 查询上游 ${UPSTREAM_REPO} 最新 release ..."
   # 不依赖 jq: 直接从 JSON 中提取 "tag_name":"..." 字段
-  RESP=$(curl -fsSL "https://api.github.com/repos/${UPSTREAM_REPO}/releases/latest")
+  API_URL="https://api.github.com/repos/${UPSTREAM_REPO}/releases/latest"
+  if [ -n "${FRP_PAT:-}" ]; then
+    # 私有仓库必须带 PAT 鉴权，否则 404
+    RESP=$(curl -fsSL -H "Authorization: Bearer ${FRP_PAT}" \
+      -H "Accept: application/vnd.github+json" "$API_URL")
+  else
+    RESP=$(curl -fsSL "$API_URL")
+  fi
   # 直接 sed 提取 "tag_name": "vX.Y.Z" 中引号内的纯 tag 值
   TAG=$(echo "$RESP" | sed -n 's/^[[:space:]]*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 fi
@@ -56,7 +71,42 @@ echo "==> 下载并计算 sha256: ${TARBALL_URL}"
 TMP_TAR="$(mktemp -t frp.XXXXXX).tar.gz"
 trap 'rm -f "$TMP_TAR"' EXIT
 
-curl -fsSL "$TARBALL_URL" -o "$TMP_TAR"
+DOWNLOAD_OK=0
+if [ -n "${FRP_PAT:-}" ]; then
+  # 方式一: codeload 直连(x-access-token 基础认证)，与 Makefile PKG_SOURCE_URL 同源
+  curl -fsSL --connect-timeout 20 --retry 5 \
+    -u "x-access-token:${FRP_PAT}" \
+    "$TARBALL_URL" \
+    -o "$TMP_TAR" && DOWNLOAD_OK=1
+
+  # 方式二: GitHub API tarball(Bearer 认证) 回退
+  # 注意: API 生成的 tarball 与 codeload 的不是同一份字节，哈希以实际下载为准
+  if [ "$DOWNLOAD_OK" -ne 1 ]; then
+    echo "==> codeload 下载失败，回退 GitHub API tarball ..."
+    curl -fsSL --connect-timeout 20 --retry 5 \
+      -H "Authorization: Bearer ${FRP_PAT}" \
+      -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/${UPSTREAM_REPO}/tarball/v${NEW_VERSION}" \
+      -o "$TMP_TAR" && DOWNLOAD_OK=1
+  fi
+else
+  # 公开仓库: 匿名下载
+  curl -fsSL --connect-timeout 20 --retry 5 \
+    "$TARBALL_URL" \
+    -o "$TMP_TAR" && DOWNLOAD_OK=1
+fi
+
+if [ "$DOWNLOAD_OK" -ne 1 ] || [ ! -s "$TMP_TAR" ]; then
+  rm -f "$TMP_TAR"
+  echo "错误: 无法下载 ${UPSTREAM_REPO} v${NEW_VERSION}" >&2
+  if [ -z "${FRP_PAT:-}" ]; then
+    echo "提示: ${UPSTREAM_REPO} 若已设为私有仓库，请先 export FRP_PAT='<有读取权限的 GitHub PAT>' 后重试" >&2
+  else
+    echo "提示: 请检查 FRP_PAT 是否对该仓库有读取权限" >&2
+  fi
+  exit 1
+fi
+
 NEW_HASH=$(sha256sum "$TMP_TAR" | awk '{print $1}')
 echo "==> 上游最新 PKG_HASH: ${NEW_HASH}"
 
