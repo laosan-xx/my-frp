@@ -1,41 +1,83 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=frp
-# 自动取 GitHub 最新 release 版本号（结果缓存 1 小时到 $(TOPDIR)/tmp，限流/离线则构建失败）
-FPR_LATEST_CACHE:=$(TOPDIR)/tmp/.frp-latest-$(PKG_NAME)
-PKG_VERSION:=$(shell \
-  if [ -s "$(FPR_LATEST_CACHE)" ]; then \
-    mtime=$$(stat -c %Y "$(FPR_LATEST_CACHE)" 2>/dev/null || echo 0); \
-    if [ $$(($$(date +%s) - mtime)) -lt 3600 ]; then cat "$(FPR_LATEST_CACHE)"; exit 0; fi; \
+
+# 兜底版本：仅当所有 API 都访问不到、且本地也没有缓存时启用，保证 PKG_VERSION 永不为空
+FRP_FALLBACK_VERSION:=0.80.9
+
+# 查询结果缓存到 $(TOPDIR)/tmp，1 小时内不再联网
+FRP_LATEST_CACHE:=$(TOPDIR)/tmp/.frp-latest-$(PKG_NAME)
+
+# 依次尝试的 API，取第一个可用的（GitHub 官方 + GH 镜像；CI 里官方 API 通常直连可用）
+FRP_LATEST_APIS:= \
+	https://api.github.com/repos/laosan-xx/frp/releases/latest \
+	https://gh.2026178.xyz/api/repos/laosan-xx/frp/releases/latest \
+	https://ghfast.top/https://api.github.com/repos/laosan-xx/frp/releases/latest
+
+# 取版本号：有效缓存 -> 逐个 API -> 过期缓存 -> 兜底版本（任何情况下都保证有输出）
+FRP_LATEST=\
+  cached=$$(cat "$(FRP_LATEST_CACHE)" 2>/dev/null); \
+  if [ -s "$(FRP_LATEST_CACHE)" ]; then \
+    mtime=$$(stat -c %Y "$(FRP_LATEST_CACHE)" 2>/dev/null || echo 0); \
+    if [ $$(($$(date +%s) - mtime)) -lt 3600 ]; then echo "$$cached"; exit 0; fi; \
   fi; \
-  v=$$(curl -fsSL --connect-timeout 5 "https://gh.2026178.xyz/api/repos/laosan-xx/frp/releases/latest" 2>/dev/null | grep -o '"tag_name": *"v[^"]*"' | grep -o '[0-9.]*'); \
-  if [ -n "$$v" ]; then mkdir -p "$$(dirname "$(FPR_LATEST_CACHE)")"; echo "$$v" > "$(FPR_LATEST_CACHE)"; echo "$$v"; fi)
+  for api in $(FRP_LATEST_APIS); do \
+    v=$$(curl -fsSL --compressed --connect-timeout 8 --max-time 20 \
+        -H "Accept: application/vnd.github+json" \
+        $${GITHUB_TOKEN:+-H "Authorization: Bearer $$GITHUB_TOKEN"} \
+        "$$api" 2>/dev/null \
+      | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -n1); \
+    if [ -n "$$v" ]; then \
+      mkdir -p "$(TOPDIR)/tmp"; echo "$$v" > "$(FPR_LATEST_CACHE)"; echo "$$v"; exit 0; \
+    fi; \
+  done; \
+  if [ -n "$$cached" ]; then echo "$$cached"; exit 0; fi; \
+  echo "frp: 获取最新版本号失败，使用兜底版本 $(FRP_FALLBACK_VERSION)" >&2; \
+  echo "$(FRP_FALLBACK_VERSION)"
+
+PKG_VERSION:=$(shell $(FRP_LATEST))
 PKG_RELEASE:=1
+
+$(if $(strip $(PKG_VERSION)),,$(error frp: PKG_VERSION 为空))
 
 # 预编译二进制来自公开 release（源码在私有库 laosan-xx/frp-diy，不参与 OpenWrt 编译）
 PKG_SOURCE_URL:=https://github.com/laosan-xx/frp/releases/download/v$(PKG_VERSION)/
 
+# release 每次更新哈希都会变，无法写死。注意：留空并不等于跳过校验——download.mk 会把缺省
+# 值 "x" 传给 download.pl，而 download.pl 只认 32/64 位十六进制或字面量 skip，收到 "x" 会直接
+# die "Cannot find appropriate hash command"，所以这里必须显式写 skip
+PKG_HASH:=skip
+
 # 按目标架构选择 release asset（PKG_VERSION 自动取最新 release，无需手改）
-# （PKG_HASH 故意省略：OpenWrt 对空 PKG_HASH 仅 warning、跳过校验，免去每次更新）
 ifeq ($(ARCH),x86_64)
-  PKG_SOURCE:=frp_$(PKG_VERSION)_linux_amd64.tar.gz
+  FRP_ARCH:=amd64
 endif
 ifeq ($(ARCH),aarch64)
-  PKG_SOURCE:=frp_$(PKG_VERSION)_linux_arm64.tar.gz
+  FRP_ARCH:=arm64
 endif
 ifeq ($(ARCH),mipsel)
-  PKG_SOURCE:=frp_$(PKG_VERSION)_linux_mipsle.tar.gz
+  FRP_ARCH:=mipsle
 endif
 ifeq ($(ARCH),mips)
-  PKG_SOURCE:=frp_$(PKG_VERSION)_linux_mips.tar.gz
+  FRP_ARCH:=mips
 endif
 ifeq ($(ARCH),arm)
   ifeq ($(CONFIG_SOFT_FLOAT),y)
-    PKG_SOURCE:=frp_$(PKG_VERSION)_linux_arm.tar.gz
+    FRP_ARCH:=arm
   else
-    PKG_SOURCE:=frp_$(PKG_VERSION)_linux_arm_hf.tar.gz
+    FRP_ARCH:=arm_hf
   endif
 endif
+
+# 不支持的架构直接报错，避免下载阶段出现晦涩错误
+ifeq ($(strip $(FRP_ARCH)),)
+  $(error frp: ARCH=$(ARCH) (SUBTARGET=$(SUBTARGET)) 没有对应的预编译包)
+endif
+
+PKG_SOURCE:=$(PKG_NAME)_$(PKG_VERSION)_linux_$(FRP_ARCH).tar.gz
+# tarball 顶层目录名就是 frp_$(PKG_VERSION)_linux_$(FRP_ARCH)，默认解压到 $(BUILD_DIR) 后
+# 正好落在 PKG_BUILD_DIR；不设的话默认 PKG_BUILD_DIR 是 frp-$(PKG_VERSION)，会找不到二进制
+PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)_$(PKG_VERSION)_linux_$(FRP_ARCH)
 
 PKG_MAINTAINER:=
 PKG_LICENSE:=Apache-2.0
@@ -45,13 +87,13 @@ PKG_BUILD_PARALLEL:=1
 
 include $(INCLUDE_DIR)/package.mk
 
-# 不支持的架构直接报错，避免下载阶段出现晦涩错误
+# 不编译，直接使用发布的二进制；解压后确认目录结构符合预期
 define Build/Prepare
-	[ -n "$(PKG_SOURCE)" ] || { \
-		echo "ERROR: frp $(PKG_VERSION) 没有对应预编译包，ARCH=$(ARCH) (SUBTARGET=$(SUBTARGET))"; \
+	$(call Build/Prepare/Default)
+	[ -x "$(PKG_BUILD_DIR)/frpc" ] || { \
+		echo "ERROR: $(PKG_BUILD_DIR)/frpc 不存在，release tarball 目录结构与预期不符"; \
 		exit 1; \
 	}
-	$(call Build/Prepare/Default)
 endef
 
 # 不编译，直接使用发布的二进制
