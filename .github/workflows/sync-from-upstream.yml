@@ -1,9 +1,9 @@
 name: Sync frp version and branches
 
-on:
-  schedule:
-    - cron: '0 6,14 * * *'
-  workflow_dispatch:
+# 此 workflow 已停用：版本改为构建时自动获取、PKG_HASH 已移除，
+# 手动运行会 sed 破坏 PKG_VERSION 的 $(shell ...) 自动获取块。
+# on: {} 表示无任何触发事件——不出 Run 按钮也不定时跑，且仍满足 YAML schema。
+on: {}
 
 permissions:
   contents: write
