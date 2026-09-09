@@ -28,7 +28,7 @@ FRP_LATEST=\
         "$$api" 2>/dev/null \
       | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -n1); \
     if [ -n "$$v" ]; then \
-      mkdir -p "$(TOPDIR)/tmp"; echo "$$v" > "$(FPR_LATEST_CACHE)"; echo "$$v"; exit 0; \
+      mkdir -p "$(TOPDIR)/tmp"; echo "$$v" > "$(FRP_LATEST_CACHE)"; echo "$$v"; exit 0; \
     fi; \
   done; \
   if [ -n "$$cached" ]; then echo "$$cached"; exit 0; fi; \
