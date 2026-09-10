@@ -35,10 +35,16 @@ FRP_LATEST=\
   echo "frp: 获取最新版本号失败，使用兜底版本 $(FRP_FALLBACK_VERSION)" >&2; \
   echo "$(FRP_FALLBACK_VERSION)"
 
-PKG_VERSION:=$(shell $(FRP_LATEST))
+PKG_VERSION:=$(strip $(shell $(FRP_LATEST)))
 PKG_RELEASE:=1
 
-$(if $(strip $(PKG_VERSION)),,$(error frp: PKG_VERSION 为空))
+# 取不到版本号就退回兜底版本，绝不用 $(error) 打断解析。
+# 原因：defconfig 阶段 OpenWrt 会 dump 每个包的 Makefile，一旦这里解析失败，
+# 它只会打印一行 ERROR 然后跳过整个包（CI 不会失败），
+# 最终表现就是"编译成功但固件里没有 frpc"。
+ifeq ($(PKG_VERSION),)
+  PKG_VERSION:=$(FRP_FALLBACK_VERSION)
+endif
 
 # 预编译二进制来自公开 release（源码在私有库 laosan-xx/frp-diy，不参与 OpenWrt 编译）
 PKG_SOURCE_URL:=https://github.com/laosan-xx/frp/releases/download/v$(PKG_VERSION)/
@@ -69,7 +75,16 @@ ifeq ($(ARCH),arm)
   endif
 endif
 
-# 不支持的架构直接报错，避免下载阶段出现晦涩错误
+# 关键：首次 defconfig 扫描包时，.config 里还没有 CONFIG_ARCH（它正是 defconfig 自己写进去的），
+# 此时 $(ARCH) 为空，上面所有 ifeq 都落空。若这时撞上下面的 $(error)，本包会被 OpenWrt 跳过，
+# 而后续 defconfig 会复用已生成的 tmp/.packageinfo 不再重扫，frpc 就彻底从固件里消失了。
+# 所以这里补一个占位值，保证 Makefile 在扫描阶段一定能被完整解析（文件名保持完整即可）。
+# 真正 download/构建时 $(ARCH) 一定有效，会重新算出正确的 FRP_ARCH。
+ifeq ($(strip $(ARCH)),)
+  FRP_ARCH:=arm64
+endif
+
+# 走到这里 FRP_ARCH 仍为空，才说明目标架构真的没有预编译包
 ifeq ($(strip $(FRP_ARCH)),)
   $(error frp: ARCH=$(ARCH) (SUBTARGET=$(SUBTARGET)) 没有对应的预编译包)
 endif
@@ -90,6 +105,7 @@ include $(INCLUDE_DIR)/package.mk
 # 不编译，直接使用发布的二进制；解压后确认目录结构符合预期
 define Build/Prepare
 	$(call Build/Prepare/Default)
+	echo "frp: ARCH=$(ARCH) FRP_ARCH=$(FRP_ARCH) VERSION=$(PKG_VERSION)"
 	[ -x "$(PKG_BUILD_DIR)/frpc" ] || { \
 		echo "ERROR: $(PKG_BUILD_DIR)/frpc 不存在，release tarball 目录结构与预期不符"; \
 		exit 1; \
