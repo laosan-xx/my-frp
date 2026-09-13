@@ -2,8 +2,11 @@ name: Sync frp version and branches
 
 # 此 workflow 已停用：版本改为构建时自动获取、PKG_HASH 已移除，
 # 手动运行会 sed 破坏 PKG_VERSION 的 $(shell ...) 自动获取块。
-# on: {} 表示无任何触发事件——不出 Run 按钮也不定时跑，且仍满足 YAML schema。
-on: {}
+# 停用方式：文件后缀改为 .disabled，GitHub 只解析 .github/workflows/ 下的 .yml/.yaml，
+# 因此本文件不会被校验、不会出现在 Actions 列表、也没有 Run 按钮。
+# 注意：不要用 `on: {}` 来"停用"——GitHub 要求 on 至少有一个事件，
+# 空对象会报 `No event triggers defined in on`。
+# 如需恢复，改回 .yml 并同步修正下面已过时的 sed 逻辑。
 
 permissions:
   contents: write
